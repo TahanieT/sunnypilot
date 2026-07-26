@@ -239,7 +239,11 @@ class DriverMonitoring:
 
     self.distracted_types['pose'] = bool((pitch_error > pitch_threshold) or (yaw_error > yaw_threshold))
     self.distracted_types['eye'] = bool((self.blink.left + self.blink.right)*0.5 > self.settings._BLINK_THRESHOLD)
-    self.distracted_types['phone'] = bool(self.phone_prob > self.settings._PHONE_THRESH)
+    phone_visible = bool(self.phone_prob > self.settings._PHONE_THRESH)
+    # Phone-in-frame alone must not trip distraction; also require gaze off-road (pose).
+    # If pose confidence is low (self.pose.low_std False), fall back to phone-alone --
+    # conservative per spec: never let uncertain gaze data suppress a real phone alert.
+    self.distracted_types['phone'] = phone_visible and (self.distracted_types['pose'] or not self.pose.low_std)
 
   def _update_states(self, driver_state, cal_rpy, car_speed, op_engaged, lowspeed, demo_mode=False, steering_angle_deg=0.):
     rhd_pred = driver_state.wheelOnRightProb
