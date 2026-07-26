@@ -55,6 +55,34 @@ assuming which branch/layout to edit. Local worktrees:
    git merge --ff-only myfork/release-tizi`
 4. Reboot to relaunch daemons with the new code (`sudo reboot`).
 
+## Applying a newer upstream release on top of this patch
+
+When sunnypilot ships a new `release-tizi` build and you want it while
+keeping this fix:
+
+1. In `c:\dev\ADS-release-tizi`: `git fetch upstream release-tizi`
+2. Replay the patch on top of it: `git rebase upstream/release-tizi`
+   (resolve conflicts by hand if upstream also touched
+   `_get_distracted_types()` — otherwise clean)
+3. Push the rewritten history to the fork (force, since rebase changes
+   commit hashes): `git push --force-with-lease origin release-tizi`
+4. On device — this is **not** a fast-forward anymore (rebase means the old
+   commit isn't an ancestor of the new one), so reset instead of merge:
+   ```
+   cd /data/openpilot
+   git fetch myfork release-tizi
+   git reset --hard myfork/release-tizi
+   ```
+5. Reboot to relaunch daemons with the new code; redeploy `watch_dm.py` if
+   it's gone (a plain `reset --hard` shouldn't touch untracked files, but
+   worth checking).
+
+Caveat: this only updates the git-tracked openpilot source. If a release
+also bundles an AGNOS (OS/firmware) update, the stock updater's
+`handle_agnos_update()` step handles that separately — a plain git-level
+reset like this won't pick that up. Only relevant if release notes mention
+an AGNOS bump; ordinary point releases are source-only.
+
 ## Critical gotcha: `DisableUpdates` doesn't stop an already-running updater
 
 `system/updated/updated.py` only checks the `DisableUpdates` param **once,
