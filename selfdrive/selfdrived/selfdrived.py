@@ -91,7 +91,7 @@ class SelfdriveD(CruiseHelper):
     # TODO: de-couple selfdrived with card/conflate on carState without introducing controls mismatches
     self.car_state_sock = messaging.sub_sock('carState', timeout=20)
 
-    ignore = self.sensor_packets + self.gps_packets + ['alertDebug', 'lateralManeuverPlan'] + ['modelDataV2SP']
+    ignore = self.sensor_packets + self.gps_packets + ['alertDebug', 'lateralManeuverPlan'] + ['modelDataV2SP', 'autoPassStateSP']
     if SIMULATION:
       ignore += ['driverCameraState', 'managerState']
     if REPLAY:
@@ -101,7 +101,7 @@ class SelfdriveD(CruiseHelper):
                                    'carOutput', 'driverMonitoringState', 'longitudinalPlan', 'livePose', 'liveDelay',
                                    'managerState', 'liveParameters', 'radarState', 'liveTorqueParameters',
                                    'controlsState', 'carControl', 'driverAssistance', 'alertDebug', 'userBookmark', 'audioFeedback',
-                                   'lateralManeuverPlan', 'modelDataV2SP', 'longitudinalPlanSP'] + \
+                                   'lateralManeuverPlan', 'modelDataV2SP', 'longitudinalPlanSP', 'autoPassStateSP'] + \
                                    self.camera_packets + self.sensor_packets + self.gps_packets,
                                   ignore_alive=ignore, ignore_avg_freq=ignore,
                                   ignore_valid=ignore, frequency=int(1/DT_CTRL))
@@ -339,6 +339,10 @@ class SelfdriveD(CruiseHelper):
       self.events_sp.add(custom.OnroadEventSP.EventName.laneTurnLeft)
     elif lane_turn_direction == TurnDirection.turnRight:
       self.events_sp.add(custom.OnroadEventSP.EventName.laneTurnRight)
+
+    # Handle Auto Pass warn-then-execute countdown
+    if self.sm['autoPassStateSP'].phase == custom.AutoPassStateSP.Phase.countdown:
+      self.events_sp.add(custom.OnroadEventSP.EventName.autoPassCountdown)
 
     for i, pandaState in enumerate(self.sm['pandaStates']):
       # All pandas must match the list of safetyConfigs, and if outside this list, must be silent or noOutput

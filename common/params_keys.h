@@ -138,6 +138,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ApiCache_DriveStats", {PERSISTENT, JSON}},
     {"AutoLaneChangeBsmDelay", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"AutoLaneChangeTimer", {PERSISTENT | BACKUP, INT, "0"}},
+    {"AutoPassEnabled", {PERSISTENT | BACKUP, BOOL, "0"}},        // hard opt-in kill switch, default OFF
+    {"AutoPassShadowMode", {PERSISTENT | BACKUP, BOOL, "1"}},     // default ON: compute/log only until explicitly disabled
     {"BlinkerLateralReengageDelay", {PERSISTENT | BACKUP, INT, "0"}},  // seconds
     {"BlinkerMinLateralControlSpeed", {PERSISTENT | BACKUP, INT, "20"}},  // MPH or km/h
     {"BlinkerPauseLateralControl", {PERSISTENT | BACKUP, INT, "0"}},

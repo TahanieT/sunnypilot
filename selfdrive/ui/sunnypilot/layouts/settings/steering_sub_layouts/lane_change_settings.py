@@ -7,12 +7,15 @@ See the LICENSE.md file in the root directory for more details.
 from collections.abc import Callable
 import pyray as rl
 
+from openpilot.common.params import Params
 from openpilot.selfdrive.ui.ui_state import ui_state
+from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.sunnypilot.widgets.list_view import toggle_item_sp, option_item_sp, LineSeparatorSP
+from openpilot.system.ui.widgets import DialogResult, Widget
+from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
 from openpilot.system.ui.widgets.network import NavButton
 from openpilot.system.ui.widgets.scroller_tici import Scroller
-from openpilot.system.ui.widgets import Widget
 
 from openpilot.sunnypilot.selfdrive.controls.lib.auto_lane_change import AutoLaneChangeMode
 
@@ -51,14 +54,47 @@ class LaneChangeSettingsLayout(Widget):
       description=lambda: tr("Toggle to enable a delay timer for seamless lane changes when blind spot monitoring " +
                              "(BSM) detects a obstructing vehicle, ensuring safe maneuvering."),
     )
+    self._auto_pass = toggle_item_sp(
+      param="AutoPassEnabled",
+      title=lambda: tr("Auto Pass (experimental)"),
+      description=lambda: tr("The car will decide on its own to change lanes and pass a slower lead vehicle -- " +
+                             "no blinker or nudge required. Only ever acts on divided, multi-lane roads; it will " +
+                             "never cross into an oncoming lane. Starts in shadow mode (computes and logs, never " +
+                             "steers) until Auto Pass: Shadow Mode is turned off below."),
+      callback=self._on_auto_pass_toggle,
+    )
+    self._auto_pass_shadow_mode = toggle_item_sp(
+      param="AutoPassShadowMode",
+      title=lambda: tr("Auto Pass: Shadow Mode"),
+      description=lambda: tr("While on, Auto Pass computes and logs what it would do but never actually steers. " +
+                             "Review your drive logs before turning this off."),
+    )
 
     items = [
       self._lane_change_timer,
       LineSeparatorSP(40),
       self._bsm_delay,
+      LineSeparatorSP(40),
+      self._auto_pass,
+      self._auto_pass_shadow_mode,
     ]
 
     return items
+
+  def _on_auto_pass_toggle(self, new_state: bool) -> None:
+    if not new_state:
+      return
+
+    def _revert():
+      Params().put_bool("AutoPassEnabled", False)
+      self._auto_pass.action_item.toggle.set_state(False)
+
+    gui_app.push_widget(ConfirmDialog(
+      tr("Auto Pass will change lanes to pass slower traffic on its own, without a blinker or nudge.\n\n"
+         "It stays in shadow mode (logs only, never steers) until you separately turn off Shadow Mode below. "
+         "Review those logs before doing that.\n\nEnable Auto Pass?"),
+      tr("Enable"),
+      callback=lambda res: None if res == DialogResult.CONFIRM else _revert()))
 
   def _update_state(self):
     super()._update_state()
@@ -79,3 +115,9 @@ class LaneChangeSettingsLayout(Widget):
     if not enable_bsm and ui_state.params.get_bool("AutoLaneChangeBsmDelay"):
       ui_state.params.remove("AutoLaneChangeBsmDelay")
     self._bsm_delay.action_item.set_enabled(enable_bsm and ui_state.params.get("AutoLaneChangeTimer", return_default=True) > AutoLaneChangeMode.NUDGE)
+
+    # Auto Pass is gated hard on BSM being available -- it's one of its safety checks.
+    if not enable_bsm and ui_state.params.get_bool("AutoPassEnabled"):
+      ui_state.params.remove("AutoPassEnabled")
+    self._auto_pass.action_item.set_enabled(enable_bsm)
+    self._auto_pass_shadow_mode.action_item.set_enabled(enable_bsm)

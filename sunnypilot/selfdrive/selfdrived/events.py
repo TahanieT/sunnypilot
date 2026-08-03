@@ -236,6 +236,14 @@ EVENTS_SP: dict[int, dict[str, Alert | AlertCallbackType]] = {
       Priority.LOW, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 5.),
   },
 
+  EventNameSP.autoPassCountdown: {
+    ET.WARNING: Alert(
+      "Auto Pass",
+      "Changing lanes to pass",
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.MID, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 0.2, creation_delay=0.),
+  },
+
   EventNameSP.e2eChime: {
     ET.PERMANENT: Alert(
       "",

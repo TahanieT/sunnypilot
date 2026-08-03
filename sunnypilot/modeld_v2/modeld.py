@@ -17,7 +17,7 @@ import pickle
 import time
 import numpy as np
 import cereal.messaging as messaging
-from cereal import car, log
+from cereal import car, log, custom
 from setproctitle import setproctitle
 from cereal.messaging import PubMaster, SubMaster
 from msgq.visionipc import VisionIpcClient, VisionStreamType, VisionBuf
@@ -292,8 +292,9 @@ def main(demo=False):
   cloudlog.warning("models loaded, modeld starting")
 
   # messaging
-  pm = PubMaster(["modelV2", "drivingModelData", "cameraOdometry", "modelDataV2SP"])
-  sm = SubMaster(["deviceState", "carState", "roadCameraState", "liveCalibration", "driverMonitoringState", "carControl", "liveDelay"])
+  pm = PubMaster(["modelV2", "drivingModelData", "cameraOdometry", "modelDataV2SP", "autoPassStateSP"])
+  sm = SubMaster(["deviceState", "carState", "roadCameraState", "liveCalibration", "driverMonitoringState", "carControl", "liveDelay",
+                  "radarState", "liveMapDataSP"])
 
   publish_state = PublishState()
   params = Params()
@@ -428,18 +429,31 @@ def main(demo=False):
       l_lane_change_prob = desire_state[log.Desire.laneChangeLeft]
       r_lane_change_prob = desire_state[log.Desire.laneChangeRight]
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
-      DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob)
+      DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob, sm['radarState'].leadOne, sm['liveMapDataSP'])
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
       mdv2sp_send.modelDataV2SP.laneTurnDirection = DH.lane_turn_direction
       drivingdata_send.drivingModelData.meta.laneChangeState = DH.lane_change_state
       drivingdata_send.drivingModelData.meta.laneChangeDirection = DH.lane_change_direction
 
+      auto_pass_send = messaging.new_message('autoPassStateSP')
+      auto_pass_state = auto_pass_send.autoPassStateSP
+      auto_pass_state.enabled = DH.auto_pass.enabled
+      auto_pass_state.shadowMode = DH.auto_pass.shadow_mode
+      auto_pass_state.phase = DH.auto_pass.phase
+      auto_pass_state.candidateDirection = int(DH.auto_pass.candidate_direction)
+      auto_pass_state.ttc = DH.auto_pass.ttc
+      auto_pass_state.vRel = DH.auto_pass.v_rel
+      auto_pass_state.multiLaneValid = DH.auto_pass.multi_lane_valid
+      auto_pass_state.multiLaneSameDirection = DH.auto_pass.multi_lane_same_direction
+      auto_pass_state.blindspotClear = DH.auto_pass.blindspot_clear
+
       fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, live_calib_seen)
       pm.send('modelV2', modelv2_send)
       pm.send('drivingModelData', drivingdata_send)
       pm.send('cameraOdometry', posenet_send)
       pm.send('modelDataV2SP', mdv2sp_send)
+      pm.send('autoPassStateSP', auto_pass_send)
     last_vipc_frame_id = meta_main.frame_id
 
 

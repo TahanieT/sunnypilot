@@ -342,6 +342,7 @@ struct OnroadEventSP @0xda96579883444c35 {
     speedLimitChanged @21;
     speedLimitPending @22;
     e2eChime @23;
+    autoPassCountdown @24;
   }
 }
 
@@ -444,7 +445,14 @@ struct LiveMapDataSP @0xf416ec09499d9d19 {
   speedLimitAhead @3 :Float32;
   speedLimitAheadDistance @4 :Float32;
   roadName @5 :Text;
+
+  # Auto Pass: OSM-derived lane data. multiLaneValid is fail-closed -- false means
+  # "unknown", and must be treated identically to "not multi-lane" by consumers.
+  multiLaneValid @6 :Bool;
+  multiLaneSameDirection @7 :Bool;
+  multiLaneDataAge @8 :Float32;
 }
+
 
 struct ModelDataV2SP @0xa1680744031fdb2d {
   laneTurnDirection @0 :TurnDirection;
@@ -456,7 +464,34 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
   }
 }
 
-struct CustomReserved10 @0xcb9fd56c7057593a {
+struct AutoPassStateSP @0xcb9fd56c7057593a {
+  enabled @0 :Bool;
+  shadowMode @1 :Bool;
+  phase @2 :Phase;
+  candidateDirection @3 :Direction;
+  ttc @4 :Float32;
+  vRel @5 :Float32;
+  multiLaneValid @6 :Bool;
+  multiLaneSameDirection @7 :Bool;
+  blindspotClear @8 :Bool;
+
+  enum Phase {
+    idle @0;
+    monitoring @1;
+    countdown @2;
+    executing @3;
+    aborted @4;
+    completed @5;
+  }
+
+  # Mirrors log.LaneChangeDirection's none/left/right ordering. Duplicated
+  # locally (not imported) because log.capnp imports custom.capnp, not the
+  # other way around.
+  enum Direction {
+    none @0;
+    left @1;
+    right @2;
+  }
 }
 
 struct CustomReserved11 @0xc2243c65e0340384 {

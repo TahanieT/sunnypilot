@@ -11,6 +11,7 @@ import platform
 from cereal import log
 from openpilot.common.params import Params
 from openpilot.sunnypilot.mapd.live_map_data.base_map_data import BaseMapData
+from openpilot.sunnypilot.mapd.live_map_data.osm_lane_data import OsmLaneData
 from openpilot.sunnypilot.navd.helpers import Coordinate
 
 
@@ -18,6 +19,7 @@ class OsmMapData(BaseMapData):
   def __init__(self):
     super().__init__()
     self.mem_params = Params("/dev/shm/params") if platform.system() != "Darwin" else self.params
+    self.lane_data = OsmLaneData()
 
   def update_location(self) -> None:
     location = self.sm['liveLocationKalman']
@@ -26,6 +28,8 @@ class OsmMapData(BaseMapData):
     if self.localizer_valid:
       self.last_bearing = math.degrees(location.calibratedOrientationNED.value[2])
       self.last_position = Coordinate(location.positionGeodetic.value[0], location.positionGeodetic.value[1])
+
+    self.lane_data.update(self.last_position, self.localizer_valid)
 
     if self.last_position is None:
       return
@@ -45,6 +49,9 @@ class OsmMapData(BaseMapData):
 
   def get_current_road_name(self) -> str:
     return str(self.mem_params.get("RoadName") or "")
+
+  def get_multi_lane_status(self) -> tuple[bool, bool, float]:
+    return self.lane_data.get_status()
 
   def get_next_speed_limit_and_distance(self) -> tuple[float, float]:
     next_speed_limit_section_str = self.mem_params.get("NextMapSpeedLimit")

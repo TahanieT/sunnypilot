@@ -255,3 +255,21 @@ sections:
       key: AutoLaneChangeTimer
       op: '>'
       value: 0
+  - key: AutoPassEnabled
+    widget: toggle
+    title: Auto Pass (experimental)
+    description: The car will decide on its own to change lanes and pass a slower lead vehicle -- no blinker or nudge required.
+    details: |-
+      Only ever acts on divided, multi-lane roads; it will never cross into an oncoming lane. Starts in shadow mode (computes and logs, never steers) until Auto Pass: Shadow Mode is turned off. Review your drive logs before doing that.
+    enablement:
+    - type: capability
+      field: enable_bsm
+      equals: true
+  - key: AutoPassShadowMode
+    widget: toggle
+    title: 'Auto Pass: Shadow Mode'
+    description: While on, Auto Pass computes and logs what it would do but never actually steers.
+    enablement:
+    - type: capability
+      field: enable_bsm
+      equals: true

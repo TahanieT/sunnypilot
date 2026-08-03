@@ -42,9 +42,15 @@ class BaseMapData(ABC):
   def get_current_road_name(self) -> str:
     pass
 
+  @abstractmethod
+  def get_multi_lane_status(self) -> tuple[bool, bool, float]:
+    """Returns (multiLaneValid, multiLaneSameDirection, dataAge). Must be fail-closed:
+    (False, False, ...) whenever the caller isn't confident, never a guess."""
+
   def publish(self) -> None:
     speed_limit = self.get_current_speed_limit()
     next_speed_limit, next_speed_limit_distance = self.get_next_speed_limit_and_distance()
+    multi_lane_valid, multi_lane_same_direction, multi_lane_data_age = self.get_multi_lane_status()
 
     mapd_sp_send = messaging.new_message('liveMapDataSP')
     mapd_sp_send.valid = self.sm['liveLocationKalman'].gpsOK
@@ -56,6 +62,9 @@ class BaseMapData(ABC):
     live_map_data.speedLimitAhead = next_speed_limit
     live_map_data.speedLimitAheadDistance = next_speed_limit_distance
     live_map_data.roadName = self.get_current_road_name()
+    live_map_data.multiLaneValid = multi_lane_valid
+    live_map_data.multiLaneSameDirection = multi_lane_valid and multi_lane_same_direction
+    live_map_data.multiLaneDataAge = multi_lane_data_age
 
     self.pm.send('liveMapDataSP', mapd_sp_send)
 
