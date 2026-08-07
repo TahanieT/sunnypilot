@@ -37,6 +37,17 @@ def speed_limit_adjust_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.
     Priority.LOW, VisualAlert.none, AudibleAlert.none, 4.)
 
 
+def auto_pass_countdown_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  direction = sm['autoPassStateSP'].candidateDirection
+  side = "left" if direction == log.LaneChangeDirection.left else "right"
+  text = "Changing lanes to pass" if direction == log.LaneChangeDirection.left else "Returning to your lane"
+  return Alert(
+    "Auto Pass",
+    f"{text} -- glance {side} to confirm",
+    AlertStatus.userPrompt, AlertSize.mid,
+    Priority.MID, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 0.2, creation_delay=0.)
+
+
 def speed_limit_pre_active_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
   speed_conv = CV.MS_TO_KPH if metric else CV.MS_TO_MPH
   v_cruise_cluster = CS.vCruiseCluster
@@ -237,11 +248,7 @@ EVENTS_SP: dict[int, dict[str, Alert | AlertCallbackType]] = {
   },
 
   EventNameSP.autoPassCountdown: {
-    ET.WARNING: Alert(
-      "Auto Pass",
-      "Changing lanes to pass",
-      AlertStatus.userPrompt, AlertSize.mid,
-      Priority.MID, VisualAlert.none, AudibleAlertSP.promptSingleHigh, 0.2, creation_delay=0.),
+    ET.WARNING: auto_pass_countdown_alert,
   },
 
   EventNameSP.e2eChime: {

@@ -58,7 +58,8 @@ class DesireHelper:
   def get_lane_change_direction(CS):
     return LaneChangeDirection.left if CS.leftBlinker else LaneChangeDirection.right
 
-  def update(self, carstate, lateral_active, lane_change_prob, lead_one=None, live_map_data=None):
+  def update(self, carstate, lateral_active, lane_change_prob, lead_one=None, live_map_data=None,
+             driver_yaw=0.0, driver_yaw_uncertainty=float('inf'), driver_pose_calibrated=False):
     self.alc.update_params()
     self.auto_pass.update_params()
     self.lane_turn_controller.update_params()
@@ -76,7 +77,8 @@ class DesireHelper:
     # Auto Pass: computes trigger_ready (while off) or execute_allowed/should_abort (while
     # armed by us in preLaneChange) for this frame. Never sets lane_change_state itself --
     # see auto_pass.py's class docstring for the ownership contract with this state machine.
-    self.auto_pass.update(carstate, lead_one, multi_lane_valid, multi_lane_same_direction, below_lane_change_speed)
+    self.auto_pass.update(carstate, lead_one, multi_lane_valid, multi_lane_same_direction, below_lane_change_speed,
+                          driver_yaw, driver_yaw_uncertainty, driver_pose_calibrated)
 
     if not lateral_active or self.lane_change_timer > LANE_CHANGE_TIME_MAX or self.alc.lane_change_set_timer == AutoLaneChangeMode.OFF:
       self.lane_change_state = LaneChangeState.off
@@ -89,7 +91,7 @@ class DesireHelper:
           self.lane_change_ll_prob = 1.0
           # Initialize lane change direction to prevent UI alert flicker
           self.lane_change_direction = self.get_lane_change_direction(carstate)
-        elif self.auto_pass.trigger_ready and not below_lane_change_speed:
+        elif (self.auto_pass.trigger_ready or self.auto_pass.return_trigger_ready) and not below_lane_change_speed:
           self.lane_change_state = LaneChangeState.preLaneChange
           self.lane_change_ll_prob = 1.0
           self.lane_change_direction = self.auto_pass.candidate_direction

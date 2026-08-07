@@ -11,20 +11,23 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT="$SCRIPT_DIR/.."
 cd "$REPO_ROOT"
 
-# Build the dev image (same image used by selfdrive/test/docker_build.sh).
+# Build the dev image for linux/arm64 (matches the comma 3X's real
+# architecture). This branch is missing common/SConscript, selfdrive/SConscript
+# etc. (present in later upstream syncs but never merged here), so `scons`
+# can't run locally regardless of platform -- but common/params_pyx.so (and
+# presumably other compiled extensions) are committed as prebuilt ARM64
+# binaries, so building for arm64 lets them load as-is without a scons rebuild.
+export TARGET_ARCHITECTURE=arm64
 ./selfdrive/test/docker_build.sh
+IMAGE=openpilot-arm64:latest
 
-# Run inside the container with the live checkout mounted over the image's
-# COPY'd source, so it tests your actual current auto-pass-dev tree.
-docker run --rm \
-  -v "$REPO_ROOT:/home/batman/openpilot" \
-  -w /home/batman/openpilot \
-  openpilot:latest \
+# Git Bash/MSYS auto-converts leading-/ arguments into Windows paths; harmless
+# here since we no longer pass any container-side path as a bare argument, but
+# left disabled defensively in case that changes.
+MSYS_NO_PATHCONV=1 docker run --rm --platform linux/arm64 \
+  "$IMAGE" \
   bash -c '
     set -e
-    echo "=== scons build ==="
-    scons -j4
-
     echo "=== Auto Pass unit tests ==="
     pytest sunnypilot/selfdrive/controls/lib/tests/test_auto_pass.py -v
 
