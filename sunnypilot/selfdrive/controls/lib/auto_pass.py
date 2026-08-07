@@ -35,10 +35,10 @@ GAZE_YAW_THRESHOLD_RAD = 0.26   # ~15 deg; placeholder -- needs bench tuning aga
 GAZE_MAX_UNCERTAINTY = 0.3      # placeholder -- align with monitoring policy's model_std_max gating once tuned
 GAZE_CONFIRM_DWELL_S = 0.5      # sustained glance required so a flick can't confirm
 CONFIRM_WINDOW_S = 4.0          # max time to wait for a confirming glance before the opportunity lapses (abort, not auto-execute)
-# NOTE: sign of driverMonitoringState.visionPolicyState.pose.yaw for "looking left"
-# vs "looking right" is UNVERIFIED against real hardware -- confirm on the bench
-# (watch_dm.py-style live readout while glancing at each mirror) before relying on
-# this for a live confirm gesture. Flip if left/right come out swapped.
+# Sign of driverMonitoringState.visionPolicyState.pose.yaw for "looking left" vs
+# "looking right" -- confirmed on this specific truck via watch_gaze.py bench
+# readout (2026-08-07): raw yaw is negative looking left, positive looking
+# right, ~0 looking straight ahead. -1 here is correct for that convention.
 GAZE_LEFT_SIGN = -1
 
 # Return-to-lane: after a completed left auto-pass, how long the return side must

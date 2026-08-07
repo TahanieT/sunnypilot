@@ -37,9 +37,10 @@ CLOSING_LEAD = make_lead(dRel=10.0, vRel=-5.0, status=True)  # ttc = 2s, well un
 FAR_LEAD = make_lead(dRel=200.0, vRel=-1.0, status=True)  # ttc = 200s, well over TTC_TRIGGER_S
 NO_LEAD = make_lead(dRel=0.0, vRel=0.0, status=False)
 
-# Sign-convention-agnostic: whatever GAZE_LEFT_SIGN is (unverified against real
-# hardware, see auto_pass.py), these raw driver_yaw values confirm the stated
-# direction and CONFIRMED_UNCERTAINTY always passes the confidence gate.
+# Sign-convention-agnostic: derived from GAZE_LEFT_SIGN (bench-confirmed, see
+# auto_pass.py) rather than hardcoded, so these stay correct if it's ever
+# revisited. These raw driver_yaw values confirm the stated direction, and
+# CONFIRMED_UNCERTAINTY always passes the confidence gate.
 _MARGIN = 0.1
 YAW_LEFT = GAZE_LEFT_SIGN * (GAZE_YAW_THRESHOLD_RAD + _MARGIN)
 YAW_RIGHT = -GAZE_LEFT_SIGN * (GAZE_YAW_THRESHOLD_RAD + _MARGIN)
