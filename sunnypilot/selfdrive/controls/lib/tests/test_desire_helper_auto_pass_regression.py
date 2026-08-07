@@ -7,6 +7,10 @@ See the LICENSE.md file in the root directory for more details.
 from cereal import car, custom, log
 
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper, LaneChangeState, LaneChangeDirection
+# _stub_auto_pass_params in conftest.py (autouse) bypasses the stale compiled
+# params key-validation table for every test in this directory. This suite's
+# "AutoPassEnabled defaults to False" assertion below still holds -- the stub
+# also returns False.
 
 
 def make_carstate(v_ego=25., left_blinker=False, right_blinker=False, left_blindspot=False, right_blindspot=False,

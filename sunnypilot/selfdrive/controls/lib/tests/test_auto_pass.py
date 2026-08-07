@@ -12,6 +12,9 @@ from openpilot.sunnypilot.selfdrive.controls.lib.auto_pass import (
   COOLDOWN_S, CONFIRM_WINDOW_S, GAZE_CONFIRM_DWELL_S, GAZE_LEFT_SIGN, GAZE_MAX_UNCERTAINTY,
   GAZE_YAW_THRESHOLD_RAD, MIN_CLOSING_SPEED, RETURN_MIN_CLEAR_S, TTC_DWELL_S, TTC_TRIGGER_S,
 )
+# _stub_auto_pass_params in conftest.py (autouse) bypasses the stale compiled
+# params key-validation table for every test in this directory -- see its
+# docstring for why.
 
 
 def make_carstate(left_blindspot=False, right_blindspot=False, brake_pressed=False,
@@ -192,38 +195,46 @@ class TestAutoPassController:
     self._update(self._clear_side_carstate(), CLOSING_LEAD, gaze_direction=None)
     assert self.ap.gaze_dwell_timer == 0.0
 
+  def _run_until_abort(self, gaze_direction=None, uncertainty=CONFIRMED_UNCERTAINTY, calibrated=True, max_updates=None):
+    """Loop _update calls, stopping the instant should_abort fires -- mirrors
+    how DesireHelper reacts within the same cycle in the real system
+    (auto_pass.update() would never be called again in preLaneChange after
+    that). should_abort is recomputed fresh from the hard conditions at the
+    top of every preLaneChange frame, so a bare loop that keeps calling
+    update() past the abort frame would see it reset back to False, unlike
+    the real system which exits preLaneChange immediately."""
+    if max_updates is None:
+      max_updates = int(CONFIRM_WINDOW_S / DT_MDL) + 2
+    for _ in range(max_updates):
+      self._update(self._clear_side_carstate(), CLOSING_LEAD, gaze_direction=gaze_direction,
+                   uncertainty=uncertainty, calibrated=calibrated)
+      if self.ap.should_abort:
+        return True
+    return False
+
   def test_right_gaze_does_not_confirm_left_pass(self):
     self._arm()  # candidate_direction is left
-    num_updates = int(CONFIRM_WINDOW_S / DT_MDL) + 2
-    for _ in range(num_updates):
-      self._update(self._clear_side_carstate(), CLOSING_LEAD, gaze_direction=LaneChangeDirection.right)
+    aborted = self._run_until_abort(gaze_direction=LaneChangeDirection.right)
     assert not self.ap.gaze_confirmed
     assert not self.ap.execute_allowed
-    assert self.ap.should_abort  # confirm window lapsed without a qualifying glance
+    assert aborted  # confirm window lapsed without a qualifying glance
 
   def test_gaze_confirm_requires_calibrated_pose(self):
     self._arm()
-    num_updates = int(CONFIRM_WINDOW_S / DT_MDL) + 2
-    for _ in range(num_updates):
-      self._update(self._clear_side_carstate(), CLOSING_LEAD, gaze_direction=LaneChangeDirection.left, calibrated=False)
+    aborted = self._run_until_abort(gaze_direction=LaneChangeDirection.left, calibrated=False)
     assert not self.ap.gaze_confirmed
-    assert self.ap.should_abort
+    assert aborted
 
   def test_gaze_confirm_requires_low_uncertainty(self):
     self._arm()
-    num_updates = int(CONFIRM_WINDOW_S / DT_MDL) + 2
-    for _ in range(num_updates):
-      self._update(self._clear_side_carstate(), CLOSING_LEAD, gaze_direction=LaneChangeDirection.left,
-                   uncertainty=UNCONFIRMED_UNCERTAINTY)
+    aborted = self._run_until_abort(gaze_direction=LaneChangeDirection.left, uncertainty=UNCONFIRMED_UNCERTAINTY)
     assert not self.ap.gaze_confirmed
-    assert self.ap.should_abort
+    assert aborted
 
   def test_confirm_window_lapses_without_gaze_aborts(self):
     self._arm()
-    num_updates = int(CONFIRM_WINDOW_S / DT_MDL) + 2
-    for _ in range(num_updates):
-      self._update(self._clear_side_carstate(), CLOSING_LEAD)
-    assert self.ap.should_abort
+    aborted = self._run_until_abort()
+    assert aborted
     assert not self.ap.execute_allowed
     assert self.ap.cooldown_timer > 0
 
@@ -439,12 +450,19 @@ class TestAutoPassReturnToLane:
     self.ap.mark_triggered()
 
   def test_left_gaze_does_not_confirm_return(self):
+    """should_abort is recomputed fresh from the hard conditions at the top of
+    every preLaneChange frame, so we must check right as it fires -- the real
+    DesireHelper exits preLaneChange the same cycle, it never loops past it."""
     self._arm_return()
-    num_updates = int(CONFIRM_WINDOW_S / DT_MDL) + 2
-    for _ in range(num_updates):
+    max_updates = int(CONFIRM_WINDOW_S / DT_MDL) + 2
+    aborted = False
+    for _ in range(max_updates):
       self._update(self._clear_side_carstate(), CLOSING_LEAD, gaze_direction=LaneChangeDirection.left)
+      if self.ap.should_abort:
+        aborted = True
+        break
     assert not self.ap.execute_allowed
-    assert self.ap.should_abort
+    assert aborted
 
   def test_right_gaze_confirms_return(self):
     self._arm_return()
