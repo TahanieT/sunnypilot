@@ -434,48 +434,28 @@ def main(demo=False):
                 dm_pose.yaw, dm_pose.uncertainty, dm_pose.calibrated)
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
+      mdv2sp_send.modelDataV2SP.laneTurnDirection = DH.lane_turn_direction
       drivingdata_send.drivingModelData.meta.laneChangeState = DH.lane_change_state
       drivingdata_send.drivingModelData.meta.laneChangeDirection = DH.lane_change_direction
+
+      auto_pass_send = messaging.new_message('autoPassStateSP')
+      auto_pass_state = auto_pass_send.autoPassStateSP
+      auto_pass_state.enabled = DH.auto_pass.enabled
+      auto_pass_state.shadowMode = DH.auto_pass.shadow_mode
+      auto_pass_state.phase = DH.auto_pass.phase
+      auto_pass_state.candidateDirection = int(DH.auto_pass.candidate_direction)
+      auto_pass_state.ttc = DH.auto_pass.ttc
+      auto_pass_state.vRel = DH.auto_pass.v_rel
+      auto_pass_state.multiLaneValid = DH.auto_pass.multi_lane_valid
+      auto_pass_state.multiLaneSameDirection = DH.auto_pass.multi_lane_same_direction
+      auto_pass_state.blindspotClear = DH.auto_pass.blindspot_clear
 
       fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, live_calib_seen)
       pm.send('modelV2', modelv2_send)
       pm.send('drivingModelData', drivingdata_send)
       pm.send('cameraOdometry', posenet_send)
-
-      # TEMP DEBUG (2026-08-08): modelDataV2SP/autoPassStateSP never reach subscribers
-      # on-device despite modelV2 et al. working fine -- isolating whether this block
-      # ever throws, and whether pm.send() is actually being reached/executed each frame.
-      # Remove once root cause is found.
-      global _autopass_debug_frame, _autopass_debug_errors
-      try:
-        _autopass_debug_frame
-      except NameError:
-        _autopass_debug_frame = 0
-        _autopass_debug_errors = 0
-      _autopass_debug_frame += 1
-      try:
-        mdv2sp_send.modelDataV2SP.laneTurnDirection = DH.lane_turn_direction
-
-        auto_pass_send = messaging.new_message('autoPassStateSP')
-        auto_pass_state = auto_pass_send.autoPassStateSP
-        auto_pass_state.enabled = DH.auto_pass.enabled
-        auto_pass_state.shadowMode = DH.auto_pass.shadow_mode
-        auto_pass_state.phase = DH.auto_pass.phase
-        auto_pass_state.candidateDirection = int(DH.auto_pass.candidate_direction)
-        auto_pass_state.ttc = DH.auto_pass.ttc
-        auto_pass_state.vRel = DH.auto_pass.v_rel
-        auto_pass_state.multiLaneValid = DH.auto_pass.multi_lane_valid
-        auto_pass_state.multiLaneSameDirection = DH.auto_pass.multi_lane_same_direction
-        auto_pass_state.blindspotClear = DH.auto_pass.blindspot_clear
-
-        pm.send('modelDataV2SP', mdv2sp_send)
-        pm.send('autoPassStateSP', auto_pass_send)
-        if _autopass_debug_frame % 100 == 0:
-          cloudlog.error(f"AUTOPASS_DEBUG: frame {_autopass_debug_frame}, sends OK, errors so far {_autopass_debug_errors}, "
-                          f"phase={DH.auto_pass.phase}")
-      except Exception:
-        _autopass_debug_errors += 1
-        cloudlog.exception(f"AUTOPASS_DEBUG: exception on frame {_autopass_debug_frame} (total errors {_autopass_debug_errors})")
+      pm.send('modelDataV2SP', mdv2sp_send)
+      pm.send('autoPassStateSP', auto_pass_send)
     last_vipc_frame_id = meta_main.frame_id
 
 
