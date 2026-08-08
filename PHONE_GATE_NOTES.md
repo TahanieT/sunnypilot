@@ -122,15 +122,25 @@ Doesn't require driving — `_get_distracted_types()` and `isDistracted`
 update live regardless of engagement; only the alert-escalation timer needs
 the car actually moving/engaged.
 
-## Bench test status (as of 2026-07-26)
+## Status: working (closed 2026-08-08)
+
+Considered done. The patch has been in daily use and behaves as intended.
+
+Bench results from 2026-07-26:
 
 - ✅ Phone visible **and** looking at it (`pose=True, phone=True`) →
   `isDistr=True`. Confirmed live on device.
 - ✅ No instance observed of `phone=True` alone flipping `isDistr` to
   `True` — every `phone=True` row also had `pose=True` in all runs so far.
-- ⏳ **Not yet confirmed**: phone visible **with eyes kept on the road**
-  (`phone=True, pose=False` → should give `isDistr=False`). Two attempts at
-  night both showed `phone` never triggering at all (likely a lighting
-  issue — the phone detector is a vision classifier and struggled in the
-  dark). Retry in daylight, holding the phone up near face level so it's
-  clearly in the driver-facing camera's view, while keeping gaze forward.
+- ⚠️ The targeted case — phone visible **with eyes kept on the road**
+  (`phone=True, pose=False` → `isDistr=False`) — was never confirmed on
+  the bench. Two attempts at night both showed `phone` never triggering at
+  all (likely a lighting issue: the phone detector is a vision classifier
+  and struggled in the dark). A daylight retry was planned but never run;
+  the behavior was confirmed satisfactory in real driving instead, so the
+  formal bench check was closed out rather than completed.
+
+If this ever needs re-verifying rigorously, the original plan was: hold the
+phone up near face level so it's clearly in the driver-facing camera's
+view, keep gaze forward, and watch for `phone=True, pose=False,
+isDistr=False` rows in `watch_dm.py`.
