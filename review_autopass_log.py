@@ -38,7 +38,8 @@ def iter_segment_messages(segment_dir):
 
 
 def collect_transitions(segment_dirs):
-  """Returns a list of dicts: t, from_phase, to_phase, dwell, direction, ttc, blindspot_clear."""
+  """Returns a list of dicts: t, from_phase, to_phase, dwell, direction, ttc,
+  blindspot_clear, multi_lane_valid, multi_lane_same_direction."""
   transitions = []
   last_phase = None
   last_direction = None
@@ -57,6 +58,7 @@ def collect_transitions(segment_dirs):
             't': t, 'from_phase': last_phase, 'to_phase': ap.phase,
             'dwell': t - phase_entered_at, 'direction': last_direction,
             'ttc': ap.ttc, 'blindspot_clear': ap.blindspotClear,
+            'multi_lane_valid': ap.multiLaneValid, 'multi_lane_same_direction': ap.multiLaneSameDirection,
           })
         last_phase = ap.phase
         phase_entered_at = t
@@ -65,12 +67,24 @@ def collect_transitions(segment_dirs):
   return transitions
 
 
+def infer_abort_reason(outcome):
+  """Best-guess reason from the fields telemetry actually exposes. Brake,
+  opposing steering torque, and gaze-confirm timeout/wrong-direction all
+  look identical here -- not distinguishable without new telemetry fields."""
+  if not outcome['blindspot_clear']:
+    return "blind spot occupied"
+  if not outcome['multi_lane_valid'] or not outcome['multi_lane_same_direction']:
+    return "road lost multi-lane validity"
+  return "brake/torque/gaze-confirm timeout (not visible in telemetry)"
+
+
 def print_timeline(transitions):
   for tr in transitions:
     print(f"[{tr['t']:>12.2f}s] {PHASE_NAMES.get(tr['from_phase'], tr['from_phase']):<12} -> "
           f"{PHASE_NAMES.get(tr['to_phase'], tr['to_phase']):<12} "
           f"(held {tr['dwell']:5.1f}s, dir={DIRECTION_NAMES.get(tr['direction'], tr['direction'])}, "
-          f"ttc={tr['ttc']:.1f}s, blindspotClear={tr['blindspot_clear']})")
+          f"ttc={tr['ttc']:.1f}s, blindspotClear={tr['blindspot_clear']}, "
+          f"multiLane={tr['multi_lane_valid']}/{tr['multi_lane_same_direction']})")
 
 
 def print_stability_summary(transitions):
@@ -112,12 +126,17 @@ def print_stability_summary(transitions):
       print(f"  avg time-to-confirm: {avg_confirm_dwell:.1f}s")
     if aborted:
       abort_dwells = []
+      abort_reasons = {}
       for i, tr in attempts:
         outcome = transitions[i + 1] if i + 1 < len(transitions) else None
         if outcome and not (outcome['from_phase'] == Phase.countdown and outcome['to_phase'] == Phase.executing):
           abort_dwells.append(outcome['dwell'])
+          reason = infer_abort_reason(outcome)
+          abort_reasons[reason] = abort_reasons.get(reason, 0) + 1
       if abort_dwells:
         print(f"  avg time-to-abort: {sum(abort_dwells) / len(abort_dwells):.1f}s")
+      for reason, count in sorted(abort_reasons.items(), key=lambda x: -x[1]):
+        print(f"    {count}x {reason}")
 
     # Cooldown gap check: time between consecutive countdown entries.
     if len(attempts) > 1:
