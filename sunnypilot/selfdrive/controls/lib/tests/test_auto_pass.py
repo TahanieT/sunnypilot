@@ -10,7 +10,8 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper, LaneChangeState, LaneChangeDirection
 from openpilot.sunnypilot.selfdrive.controls.lib.auto_pass import (
   COOLDOWN_S, CONFIRM_WINDOW_S, GAZE_CONFIRM_DWELL_S, GAZE_LEFT_SIGN, GAZE_MAX_UNCERTAINTY,
-  GAZE_YAW_THRESHOLD_RAD, MIN_CLOSING_SPEED, RETURN_MIN_CLEAR_S, TTC_DWELL_S, TTC_TRIGGER_S,
+  GAZE_YAW_THRESHOLD_RAD, MIN_CLOSING_SPEED, RETURN_MIN_CLEAR_S, SPEED_DEFICIT_DWELL_S,
+  SPEED_DEFICIT_THRESHOLD_MS, TTC_DWELL_S, TTC_TRIGGER_S,
 )
 # _stub_auto_pass_params in conftest.py (autouse) bypasses the stale compiled
 # params key-validation table for every test in this directory -- see its
@@ -18,27 +19,34 @@ from openpilot.sunnypilot.selfdrive.controls.lib.auto_pass import (
 
 
 def make_carstate(left_blindspot=False, right_blindspot=False, brake_pressed=False,
-                   steering_pressed=False, steering_torque=0.0):
+                   steering_pressed=False, steering_torque=0.0, cruise_speed=0.0):
   cs = car.CarState.new_message()
   cs.leftBlindspot = left_blindspot
   cs.rightBlindspot = right_blindspot
   cs.brakePressed = brake_pressed
   cs.steeringPressed = steering_pressed
   cs.steeringTorque = steering_torque
+  cs.cruiseState.speed = cruise_speed
   return cs
 
 
-def make_lead(dRel=30.0, vRel=-5.0, status=True):
+def make_lead(dRel=30.0, vRel=-5.0, status=True, vLead=0.0):
   lead = log.RadarState.LeadData.new_message()
   lead.dRel = dRel
   lead.vRel = vRel
   lead.status = status
+  lead.vLead = vLead
   return lead
 
 
 CLOSING_LEAD = make_lead(dRel=10.0, vRel=-5.0, status=True)  # ttc = 2s, well under TTC_TRIGGER_S
 FAR_LEAD = make_lead(dRel=200.0, vRel=-1.0, status=True)  # ttc = 200s, well over TTC_TRIGGER_S
 NO_LEAD = make_lead(dRel=0.0, vRel=0.0, status=False)
+
+# Steady-state: zero closing rate (ttc = inf) but sustained well below cruise
+# speed -- this is exactly the case the speed-deficit trigger exists for.
+CRUISE_SPEED = 30.0  # m/s, ~67mph
+STEADY_SLOW_LEAD = make_lead(dRel=25.0, vRel=0.0, status=True, vLead=CRUISE_SPEED - SPEED_DEFICIT_THRESHOLD_MS - 1.0)
 
 # Sign-convention-agnostic: derived from GAZE_LEFT_SIGN (bench-confirmed, see
 # auto_pass.py) rather than hardcoded, so these stay correct if it's ever
@@ -152,6 +160,53 @@ class TestAutoPassController:
 
     self._update(self._clear_side_carstate(), FAR_LEAD)  # condition drops out
     assert self.ap.ttc_dwell_timer == 0.0
+
+  def _dwell_speed_deficit(self, margin_updates=2):
+    """Steady-state: zero closing rate (ttc stays inf the whole time) but
+    sustained meaningfully below cruise speed -- the case a TTC-only trigger
+    can never catch, since GM's own ACC has already settled into following."""
+    cs = make_carstate(cruise_speed=CRUISE_SPEED)
+    num_updates = int(SPEED_DEFICIT_DWELL_S / DT_MDL) + margin_updates
+    for _ in range(num_updates):
+      self._update(cs, STEADY_SLOW_LEAD)
+
+  def test_speed_deficit_triggers_in_steady_state(self):
+    self._dwell_speed_deficit()
+    assert self.ap.ttc == float('inf')  # confirms this genuinely isn't the TTC path firing
+    assert self.ap.trigger_ready
+    assert self.ap.candidate_direction == LaneChangeDirection.left
+
+  def test_speed_deficit_dwell_resets_if_condition_drops(self):
+    cs = make_carstate(cruise_speed=CRUISE_SPEED)
+    num_updates_below = max(int(SPEED_DEFICIT_DWELL_S / DT_MDL) - 2, 1)
+    for _ in range(num_updates_below):
+      self._update(cs, STEADY_SLOW_LEAD)
+    assert not self.ap.trigger_ready
+
+    # FAR_LEAD is wrong here: it clears TTC (huge dRel) but its vLead defaults to
+    # 0.0, which is still deficient -- speed-deficit only compares vLead to cruise
+    # speed, not distance. Use a lead actually holding cruise speed instead.
+    lead_at_cruise_speed = make_lead(dRel=25.0, vRel=0.0, status=True, vLead=CRUISE_SPEED)
+    self._update(cs, lead_at_cruise_speed)  # lead speed no longer deficient -- condition drops out
+    assert self.ap.speed_deficit_dwell_timer == 0.0
+
+  def test_no_speed_deficit_trigger_without_cruise_speed_set(self):
+    """cruiseState.speed == 0 means no active set speed to compare against --
+    must not treat that as an infinite deficit."""
+    cs = make_carstate(cruise_speed=0.0)
+    num_updates = int(SPEED_DEFICIT_DWELL_S / DT_MDL) + 2
+    for _ in range(num_updates):
+      self._update(cs, STEADY_SLOW_LEAD)
+    assert not self.ap.trigger_ready
+
+  def test_no_speed_deficit_trigger_when_deficit_too_small(self):
+    cs = make_carstate(cruise_speed=CRUISE_SPEED)
+    barely_slow_lead = make_lead(dRel=25.0, vRel=0.0, status=True,
+                                  vLead=CRUISE_SPEED - SPEED_DEFICIT_THRESHOLD_MS + 0.5)
+    num_updates = int(SPEED_DEFICIT_DWELL_S / DT_MDL) + 2
+    for _ in range(num_updates):
+      self._update(cs, barely_slow_lead)
+    assert not self.ap.trigger_ready
 
   def _arm(self):
     """Drive the off -> preLaneChange transition the way DesireHelper does."""

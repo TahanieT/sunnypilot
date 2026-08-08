@@ -27,6 +27,18 @@ COOLDOWN_S = 20.0        # minimum time between successive attempts, prevents re
 # arm a lane change on its own.
 TTC_DWELL_S = 1.0  # placeholder -- needs shadow-mode tuning against this platform's actual vision-lead noise
 
+# Speed-deficit trigger: a pure closing-rate/TTC trigger only catches the
+# transient *approach* on a slower lead -- once GM's own ACC has settled into
+# steady-state following (vRel ~ 0), TTC goes to inf and never fires again,
+# even though we're now stuck behind that car for the next several miles.
+# This is worse at wider GM spacing settings, since GM's ACC decelerates
+# earlier and more gently, often never producing a closing rate sharp enough
+# to trip the TTC gate at all. This is a second, independent way to arm the
+# same outbound trigger: lead's absolute speed sustained meaningfully below
+# our own cruise set speed, regardless of current closing rate.
+SPEED_DEFICIT_THRESHOLD_MS = 3.0  # ~6.7mph; placeholder -- needs shadow-mode tuning
+SPEED_DEFICIT_DWELL_S = 5.0       # longer than TTC_DWELL_S on purpose -- must reject a momentary dip (e.g. cresting a hill), not just noise
+
 # Gaze-confirm: mirrors GM Super Cruise / BMW Active Lane Change Assist -- driver
 # glances toward the mirror on the side of the maneuver to confirm it, rather than
 # the maneuver auto-executing off a bare timer. Left confirms the outbound pass;
@@ -48,9 +60,13 @@ RETURN_MIN_CLEAR_S = 3.0  # placeholder -- needs shadow-mode tuning
 
 class AutoPassController:
   """
-  Autonomously arms a lane change to pass a closing lead vehicle -- no driver
-  blinker/torque input required to arm it. Hard-gated on:
-    - time-to-collision to the lead vehicle (radar)
+  Autonomously arms a lane change to pass a slower lead vehicle -- no driver
+  blinker/torque input required to arm it. Arms on either of two independent
+  conditions (see SPEED_DEFICIT_* constants above for why there are two):
+  sustained closing rate (time-to-collision) on the lead, or the lead's
+  absolute speed sustained meaningfully below our own cruise set speed
+  (catches the steady-state "already stuck behind them" case a closing-rate
+  trigger alone misses). Both also require:
     - a same-direction, oneway-tagged multi-lane road (OSM, fail-closed --
       see sunnypilot/mapd/live_map_data/osm_lane_data.py)
     - blind spot clear on the chosen side
@@ -97,6 +113,7 @@ class AutoPassController:
     self.gaze_dwell_timer = 0.0
 
     self.ttc_dwell_timer = 0.0
+    self.speed_deficit_dwell_timer = 0.0
 
     self.return_pending = False
     self.return_clear_timer = 0.0
@@ -160,6 +177,7 @@ class AutoPassController:
     self.gaze_confirmed = False
     self.gaze_dwell_timer = 0.0
     self.ttc_dwell_timer = 0.0
+    self.speed_deficit_dwell_timer = 0.0
 
   def _idle(self) -> None:
     self.trigger_ready = False
@@ -171,6 +189,7 @@ class AutoPassController:
     self.gaze_confirmed = False
     self.gaze_dwell_timer = 0.0
     self.ttc_dwell_timer = 0.0
+    self.speed_deficit_dwell_timer = 0.0
     self.return_pending = False
     self.return_clear_timer = 0.0
     self.return_trigger_ready = False
@@ -213,10 +232,17 @@ class AutoPassController:
         return
 
       self.return_trigger_ready = False
-      ttc_condition = (self.cooldown_timer <= 0 and not below_lane_change_speed and
-                        self.ttc < TTC_TRIGGER_S and self.multi_lane_same_direction)
+      base_ready = self.cooldown_timer <= 0 and not below_lane_change_speed and self.multi_lane_same_direction
+
+      ttc_condition = base_ready and self.ttc < TTC_TRIGGER_S
       self.ttc_dwell_timer = self.ttc_dwell_timer + DT_MDL if ttc_condition else 0.0
-      ready = self.ttc_dwell_timer >= TTC_DWELL_S
+
+      has_lead = lead_one is not None and (lead_one.status or lead_one.radar)
+      speed_deficit_condition = (base_ready and has_lead and carstate.cruiseState.speed > 0 and
+                                  (carstate.cruiseState.speed - lead_one.vLead) > SPEED_DEFICIT_THRESHOLD_MS)
+      self.speed_deficit_dwell_timer = self.speed_deficit_dwell_timer + DT_MDL if speed_deficit_condition else 0.0
+
+      ready = (self.ttc_dwell_timer >= TTC_DWELL_S) or (self.speed_deficit_dwell_timer >= SPEED_DEFICIT_DWELL_S)
       direction = self._select_side(carstate.leftBlindspot) if ready else LaneChangeDirection.none
       self.trigger_ready = ready and direction != LaneChangeDirection.none
       self.candidate_direction = direction if self.trigger_ready else LaneChangeDirection.none
