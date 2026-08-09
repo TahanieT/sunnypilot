@@ -30,6 +30,7 @@ from openpilot.common.transformations.camera import DEVICE_CAMERAS
 from openpilot.common.transformations.model import get_warp_matrix
 from openpilot.system import sentry
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
+from openpilot.sunnypilot.selfdrive.controls.lib.auto_pass import fill_auto_pass_state
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, smooth_value
 
 from openpilot.sunnypilot.modeld_v2.fill_model_msg import fill_model_msg, fill_pose_msg, PublishState, get_curvature_from_output
@@ -438,17 +439,12 @@ def main(demo=False):
       drivingdata_send.drivingModelData.meta.laneChangeState = DH.lane_change_state
       drivingdata_send.drivingModelData.meta.laneChangeDirection = DH.lane_change_direction
 
+      # Filled twice: the standalone service for live subscribers, and the copy inside
+      # modelDataV2SP, which is the one that actually reaches the rlog (loggerd's
+      # compiled-in service list predates autoPassStateSP -- see AUTO_PASS_NOTES.md).
       auto_pass_send = messaging.new_message('autoPassStateSP')
-      auto_pass_state = auto_pass_send.autoPassStateSP
-      auto_pass_state.enabled = DH.auto_pass.enabled
-      auto_pass_state.shadowMode = DH.auto_pass.shadow_mode
-      auto_pass_state.phase = DH.auto_pass.phase
-      auto_pass_state.candidateDirection = int(DH.auto_pass.candidate_direction)
-      auto_pass_state.ttc = DH.auto_pass.ttc
-      auto_pass_state.vRel = DH.auto_pass.v_rel
-      auto_pass_state.multiLaneValid = DH.auto_pass.multi_lane_valid
-      auto_pass_state.multiLaneSameDirection = DH.auto_pass.multi_lane_same_direction
-      auto_pass_state.blindspotClear = DH.auto_pass.blindspot_clear
+      fill_auto_pass_state(auto_pass_send.autoPassStateSP, DH.auto_pass)
+      fill_auto_pass_state(mdv2sp_send.modelDataV2SP.autoPass, DH.auto_pass)
 
       fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, live_calib_seen)
       pm.send('modelV2', modelv2_send)

@@ -18,6 +18,7 @@ from openpilot.common.transformations.camera import DEVICE_CAMERAS
 from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
 from openpilot.common.transformations.model import get_warp_matrix
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
+from openpilot.sunnypilot.selfdrive.controls.lib.auto_pass import fill_auto_pass_state
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, smooth_value, get_curvature_from_plan
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 from openpilot.selfdrive.modeld.compile_modeld import make_input_queues, WARP_INPUTS, POLICY_INPUTS
@@ -335,17 +336,12 @@ def main(demo=False):
       # AutoPass telemetry: DH constructs AutoPassController here same as in modeld_v2,
       # so publish its state from the stock runner too -- otherwise the countdown alert
       # and review_autopass_log.py see nothing whenever the stock model is active.
+      # Filled twice: the standalone service for live subscribers, and the copy inside
+      # modelDataV2SP, which is the one that actually reaches the rlog (loggerd's
+      # compiled-in service list predates autoPassStateSP -- see AUTO_PASS_NOTES.md).
       auto_pass_send = messaging.new_message('autoPassStateSP')
-      auto_pass_state = auto_pass_send.autoPassStateSP
-      auto_pass_state.enabled = DH.auto_pass.enabled
-      auto_pass_state.shadowMode = DH.auto_pass.shadow_mode
-      auto_pass_state.phase = DH.auto_pass.phase
-      auto_pass_state.candidateDirection = int(DH.auto_pass.candidate_direction)
-      auto_pass_state.ttc = DH.auto_pass.ttc
-      auto_pass_state.vRel = DH.auto_pass.v_rel
-      auto_pass_state.multiLaneValid = DH.auto_pass.multi_lane_valid
-      auto_pass_state.multiLaneSameDirection = DH.auto_pass.multi_lane_same_direction
-      auto_pass_state.blindspotClear = DH.auto_pass.blindspot_clear
+      fill_auto_pass_state(auto_pass_send.autoPassStateSP, DH.auto_pass)
+      fill_auto_pass_state(mdv2sp_send.modelDataV2SP.autoPass, DH.auto_pass)
 
       fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, live_calib_seen)
       pm.send('modelV2', modelv2_send)

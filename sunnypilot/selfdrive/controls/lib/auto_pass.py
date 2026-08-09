@@ -325,3 +325,22 @@ class AutoPassController:
     if lane_change_state == LaneChangeState.preLaneChange:
       return AutoPassPhase.countdown
     return AutoPassPhase.executing
+
+
+def fill_auto_pass_state(msg, auto_pass: AutoPassController) -> None:
+  """Populate an AutoPassStateSP builder from a controller.
+
+  Shared by both modeld variants, and used twice per frame: once for the
+  standalone autoPassStateSP service, once for the copy embedded in
+  modelDataV2SP (which is what actually survives into the rlog -- see
+  AUTO_PASS_NOTES.md).
+  """
+  msg.enabled = auto_pass.enabled
+  msg.shadowMode = auto_pass.shadow_mode
+  msg.phase = auto_pass.phase
+  msg.candidateDirection = int(auto_pass.candidate_direction)
+  msg.ttc = auto_pass.ttc
+  msg.vRel = auto_pass.v_rel
+  msg.multiLaneValid = auto_pass.multi_lane_valid
+  msg.multiLaneSameDirection = auto_pass.multi_lane_same_direction
+  msg.blindspotClear = auto_pass.blindspot_clear

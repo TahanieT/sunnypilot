@@ -37,6 +37,34 @@ def iter_segment_messages(segment_dir):
     yield m
 
 
+def collect_samples(segment_dirs):
+  """Returns (samples, source_label), where samples is a list of (t, ap).
+
+  Two possible sources, because the standalone autoPassStateSP service does not
+  survive into the rlog on a prebuilt install: loggerd's compiled-in service
+  list predates that service, so it never subscribes to it. modelDataV2SP does
+  log, and carries an embedded copy. See AUTO_PASS_NOTES.md.
+
+  Prefer the standalone service when present -- it is the authoritative channel
+  and would be there on any install with a loggerd rebuilt from a regenerated
+  services.h. Fall back to the embedded copy otherwise.
+  """
+  direct = []
+  embedded = []
+
+  for segment_dir in segment_dirs:
+    for m in iter_segment_messages(segment_dir):
+      which = m.which()
+      if which == 'autoPassStateSP':
+        direct.append((m.logMonoTime / 1e9, m.autoPassStateSP))
+      elif which == 'modelDataV2SP':
+        embedded.append((m.logMonoTime / 1e9, m.modelDataV2SP.autoPass))
+
+  if direct:
+    return direct, "autoPassStateSP"
+  return embedded, "modelDataV2SP.autoPass (embedded copy)"
+
+
 def collect_transitions(segment_dirs):
   """Returns a list of dicts: t, from_phase, to_phase, dwell, direction, ttc,
   blindspot_clear, multi_lane_valid, multi_lane_same_direction."""
@@ -45,24 +73,21 @@ def collect_transitions(segment_dirs):
   last_direction = None
   phase_entered_at = None
 
-  for segment_dir in segment_dirs:
-    for m in iter_segment_messages(segment_dir):
-      if m.which() != 'autoPassStateSP':
-        continue
-      ap = m.autoPassStateSP
-      t = m.logMonoTime / 1e9
+  samples, source = collect_samples(segment_dirs)
+  print(f"(telemetry source: {source}; {len(samples)} samples)")
 
-      if ap.phase != last_phase:
-        if last_phase is not None and phase_entered_at is not None:
-          transitions.append({
-            't': t, 'from_phase': last_phase, 'to_phase': ap.phase,
-            'dwell': t - phase_entered_at, 'direction': last_direction,
-            'ttc': ap.ttc, 'blindspot_clear': ap.blindspotClear,
-            'multi_lane_valid': ap.multiLaneValid, 'multi_lane_same_direction': ap.multiLaneSameDirection,
-          })
-        last_phase = ap.phase
-        phase_entered_at = t
-      last_direction = ap.candidateDirection
+  for t, ap in samples:
+    if ap.phase != last_phase:
+      if last_phase is not None and phase_entered_at is not None:
+        transitions.append({
+          't': t, 'from_phase': last_phase, 'to_phase': ap.phase,
+          'dwell': t - phase_entered_at, 'direction': last_direction,
+          'ttc': ap.ttc, 'blindspot_clear': ap.blindspotClear,
+          'multi_lane_valid': ap.multiLaneValid, 'multi_lane_same_direction': ap.multiLaneSameDirection,
+        })
+      last_phase = ap.phase
+      phase_entered_at = t
+    last_direction = ap.candidateDirection
 
   return transitions
 
@@ -93,7 +118,7 @@ def print_stability_summary(transitions):
   print("=" * 70)
 
   if not transitions:
-    print("No autoPassStateSP activity -- check AutoPassEnabled was actually on during this drive.")
+    print("No AutoPass phase activity -- check AutoPassEnabled was actually on during this drive.")
     return
 
   # A "countdown attempt" is any transition INTO countdown. Its outcome is

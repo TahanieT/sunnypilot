@@ -457,6 +457,15 @@ struct LiveMapDataSP @0xf416ec09499d9d19 {
 struct ModelDataV2SP @0xa1680744031fdb2d {
   laneTurnDirection @0 :TurnDirection;
 
+  # Logged copy of autoPassStateSP. The standalone autoPassStateSP service is
+  # published, and live Python subscribers receive it fine, but it is absent
+  # from the generated cereal/services.h that the prebuilt loggerd binary was
+  # compiled against -- so loggerd never subscribes to it and it never reaches
+  # any rlog. modelDataV2SP *is* in that header and logs reliably, so carrying
+  # the state here is what makes it reviewable offline. Remove once loggerd is
+  # rebuilt from a regenerated services.h. See AUTO_PASS_NOTES.md.
+  autoPass @1 :AutoPassStateSP;
+
   enum TurnDirection {
     none @0;
     turnLeft @1;

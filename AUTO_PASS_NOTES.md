@@ -141,6 +141,54 @@ for m in LogReader("/data/media/0/realdata/<route>--<seg>/rlog.zst"):
 print(c.most_common(20))
 ```
 
+## The loggerd / stale `services.h` gotcha
+
+**A second, independent reason AutoPass telemetry was missing — found after
+the runner fix above was already deployed and driven.**
+
+Fixing the runner problem made modeld publish `autoPassStateSP` correctly, and
+live Python subscribers (including `selfdrived`, so the countdown alert) receive
+it fine. But a full drive still recorded **zero** `autoPassStateSP` messages
+across 14,176 model frames.
+
+Cause: `cereal/services.h` is a **generated** C++ header (`services.py` has a
+`build_header()` that prints it), and it is **tracked in git**. `services.py`
+gained `autoPassStateSP` in the Auto Pass commit, but `services.h` was never
+regenerated — it was last written by the upstream release commit. `loggerd` is
+C++, `#include`s that header, and iterates the compiled-in `services` map
+(`loggerd.cc:234`) to decide what to subscribe to. A service missing from the
+header is never subscribed and never reaches any rlog.
+
+This is the same class of bug as the stale `params_pyx.so`: a generated or
+compiled artifact drifting out of sync with the Python source that defines it.
+
+**Why it can't simply be rebuilt here:** this `release-tizi` branch ships
+prebuilt — 579 tracked executables and **no root `SConstruct`**. Regenerating
+the header alone changes nothing, because the shipped `loggerd` binary already
+has the old map baked in. The `loggerd.cc` sources are present, so a hand build
+is possible in principle, but loggerd also owns video encoding and all logging,
+so a botched build means no logs at all.
+
+**Workaround in place:** `ModelDataV2SP` gained an embedded `autoPass` field
+holding a copy of the same state. `modelDataV2SP` *is* in the generated header
+and logs reliably (confirmed at ~1200/segment, exactly matching `modelV2`), so
+the copy is what actually survives into the rlog. Adding a capnp field is
+backward-compatible by design, so the prebuilt C++ readers are unaffected and
+nothing needed recompiling. Both modelds fill both destinations via
+`fill_auto_pass_state()` in `auto_pass.py`, and `review_autopass_log.py` prefers
+the standalone service when present and falls back to the embedded copy.
+
+`cereal/services.h` has also been regenerated and committed, so a future build
+from source is correct. **That does not fix the running binary** — the embedded
+copy remains the working path until a rebuilt `loggerd` ships.
+
+**Diagnostic tip:** if a message is published but absent from logs, check
+whether it's in `cereal/services.h` (not just `services.py`) before suspecting
+the publisher. A useful narrowing trick: this publish block sits *before*
+`pm.send('modelV2', ...)`, so if it were throwing, `modelV2` would have stopped
+too — `modelV2` being healthy proved the publisher was fine and moved suspicion
+to the logger.
+
 ## Log review tooling
 
 `review_autopass_log.py` (repo root) walks a route's `rlog.zst` segments and
@@ -178,9 +226,15 @@ In order, none of it skippable:
 2. Enable `AutoPassEnabled` in Settings.
 3. Drive with `AutoPassShadowMode` **still on**. It logs and shows the
    direction-aware countdown alert but never steers.
-4. Verify the telemetry actually recorded: run the message census above and
-   confirm `autoPassStateSP` comes back at roughly `modelV2`'s count per
-   segment, not 0.
+4. Verify the telemetry actually recorded. Note that `autoPassStateSP` will
+   still read 0 in the census — that is expected, see the loggerd section
+   below. What matters is that `modelDataV2SP` carries a populated embedded
+   `autoPass` copy. Check with:
+   ```python
+   for m in LogReader(".../rlog.zst"):
+       if m.which() == "modelDataV2SP":
+           print(m.modelDataV2SP.autoPass); break
+   ```
 5. Run `review_autopass_log.py` against the route and review the stability
    summary. Tune the placeholder constants against what it shows.
 6. Only then consider disabling shadow mode.
