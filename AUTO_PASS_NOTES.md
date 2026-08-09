@@ -110,15 +110,40 @@ The chain: `ModelManager_ActiveBundle` unset → `get_active_bundle()` returns
 `is_stock_model` true → `system/manager/process_config.py` launches
 `selfdrive.modeld.modeld` and never launches `sunnypilot/modeld_v2`.
 
-Critically, `DesireHelper` — and therefore `AutoPassController` — is constructed
-in **both** modelds. So the AutoPass logic was running the whole time under the
-stock runner; it was simply **invisible**, with no telemetry and no UI.
+`DesireHelper` — and therefore `AutoPassController` — is constructed in **both**
+modelds, so the object exists either way.
 
-**Safety consequence:** `selfdrive/selfdrived/selfdrived.py` gates the
-gaze-confirm countdown alert on `sm['autoPassStateSP'].phase == countdown`. With
-the message never published, `phase` sat at its default, so the driver-facing
-confirm prompt could never appear. Had shadow mode been switched off in that
-state, the maneuver logic would have been live with no countdown prompt.
+**But AutoPass is completely inert on the stock runner, not merely invisible.**
+The optional inputs are never passed:
+
+```
+stock:     DH.update(carState, latActive, lane_change_prob)
+modeld_v2: DH.update(carState, latActive, lane_change_prob, radarState.leadOne,
+                     liveMapDataSP, dm_pose.yaw, dm_pose.uncertainty, dm_pose.calibrated)
+```
+
+`DesireHelper.update`'s trailing parameters default to `lead_one=None`,
+`live_map_data=None`, `driver_yaw=0.0`, `driver_yaw_uncertainty=inf`,
+`driver_pose_calibrated=False`. On the stock runner that means:
+
+- no lead → `ttc=inf`, `vRel=0`, so the TTC trigger cannot fire, and `has_lead`
+  is False so the speed-deficit trigger cannot either
+- no map data → `multi_lane_valid=False`, and `base_ready` requires
+  `multi_lane_same_direction`, so **nothing can ever arm**
+- no gaze → confirmation could never succeed regardless
+
+Confirmed empirically on a 2026-08-09 drive under the stock runner: `ttc=inf`,
+`vRel=0.0`, `multiLaneValid` 0 of 12,264 frames, phase `idle` every frame.
+
+**Consequence for testing:** shadow-mode drives on the stock runner are always
+empty, no matter how many you do. Selecting any model bundle flips the runner to
+tinygrad (all 68 bundles in the sunnypilot list are tinygrad — "stock" is only
+the no-bundle-selected fallback), which runs modeld_v2 and wires everything up.
+That is the intended configuration for this feature.
+
+Note the earlier concern that shadow mode off could leave a live maneuver with
+no countdown prompt does **not** apply on the stock runner, since it cannot arm
+at all. It would apply on tinygrad if telemetry were broken there.
 
 **Fix:** the publish block was added to stock `selfdrive/modeld/modeld.py` as
 well, mirroring modeld_v2's field set. This was chosen over switching the device
@@ -221,6 +246,11 @@ if root-causing a specific abort ever matters.
 
 In order, none of it skippable:
 
+0. **Select a model bundle in Settings** so the runner is tinygrad. Without
+   this the device falls back to the stock runner, where AutoPass is inert and
+   every shadow-mode drive records nothing. Verify afterward that
+   `ModelRunnerTypeCache` reads `1` (tinygrad) and that the onroad process list
+   contains `modeld_tinygrad` rather than `modeld`.
 1. Reboot test on the current `params_pyx.so` (see below) — confirm normal
    operation survives a real boot.
 2. Enable `AutoPassEnabled` in Settings.
