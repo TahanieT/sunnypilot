@@ -4,6 +4,7 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
+import threading
 import time
 
 import requests
@@ -15,8 +16,18 @@ from openpilot.sunnypilot.navd.helpers import Coordinate
 # release binary with no exposed query interface for arbitrary OSM tags, so
 # lane-count data is fetched independently here via a live Overpass query.
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+# overpass-api.de answers requests carrying the default python-requests
+# User-Agent with "406 Not Acceptable" -- deterministically, before it ever
+# looks at the query. Without this header every lookup fails and multi-lane
+# never resolves, which is exactly what happened on every drive up to
+# 2026-08-10. Verified on-device: no header -> 406 in 1.2s; this header ->
+# 200 in 0.8s.
+REQUEST_HEADERS = {"User-Agent": "sunnypilot-autopass/1.0"}
 QUERY_RADIUS_M = 30
-REQUEST_TIMEOUT_S = 5.0
+# Runs on a worker thread, so this no longer blocks the 1Hz mapd tick. 5s was
+# too tight for the public Overpass endpoint -- it accounted for 15 of 18
+# observed failures on a drive that did have working connectivity.
+REQUEST_TIMEOUT_S = 20.0
 MIN_REQUERY_DISTANCE_M = 150.0
 MIN_REQUERY_INTERVAL_S = 10.0
 STALE_TIMEOUT_S = 30.0
@@ -79,6 +90,11 @@ class OsmLaneData:
     self._last_query_pos: Coordinate | None = None
     self._last_query_time: float = 0.0
     self._status = LaneStatus()
+    # The query runs on a worker thread: mapd_manager ticks this at 1Hz and a
+    # blocking HTTP call would stall roadName/speedLimit publishing for the
+    # whole request. _lock guards _status and _cache, which the worker writes.
+    self._lock = threading.Lock()
+    self._inflight = False
 
   def _should_query(self, pos: Coordinate, now: float) -> bool:
     if self._last_query_pos is None:
@@ -94,7 +110,8 @@ class OsmLaneData:
       f"out tags 1;"
     )
     try:
-      response = requests.post(OVERPASS_URL, data={"data": query}, timeout=REQUEST_TIMEOUT_S)
+      response = requests.post(OVERPASS_URL, data={"data": query}, headers=REQUEST_HEADERS,
+                               timeout=REQUEST_TIMEOUT_S)
       response.raise_for_status()
       elements = response.json().get("elements", [])
     except Exception as e:
@@ -106,11 +123,29 @@ class OsmLaneData:
 
     return elements[0].get("tags", {})
 
+  def _run_query(self, pos: Coordinate, key: tuple[int, int]) -> None:
+    """Worker body. Never raises into the thread -- a failed request simply
+    leaves the previous status alone, and staleness fail-closes it."""
+    try:
+      tags = self._query_overpass(pos)
+      if tags is not None:
+        status = LaneStatus(valid=True, same_direction=_is_multi_lane_same_direction(tags),
+                            resolved_at=time.monotonic())
+        with self._lock:
+          self._status = status
+          if len(self._cache) >= CACHE_MAX_ENTRIES:
+            self._cache.pop(next(iter(self._cache)))
+          self._cache[key] = status
+    finally:
+      with self._lock:
+        self._inflight = False
+
   def update(self, pos: Coordinate | None, localizer_valid: bool) -> None:
     now = time.monotonic()
 
     if not localizer_valid or pos is None:
-      self._status = LaneStatus()
+      with self._lock:
+        self._status = LaneStatus()
       return
 
     if self._should_query(pos, now):
@@ -118,24 +153,28 @@ class OsmLaneData:
       self._last_query_time = now
 
       key = _grid_key(pos)
-      cached = self._cache.get(key)
-      if cached is not None and cached.age(now) < STALE_TIMEOUT_S:
-        self._status = cached
-      else:
-        tags = self._query_overpass(pos)
-        if tags is not None:
-          status = LaneStatus(valid=True, same_direction=_is_multi_lane_same_direction(tags), resolved_at=now)
-          self._status = status
-          if len(self._cache) >= CACHE_MAX_ENTRIES:
-            self._cache.pop(next(iter(self._cache)))
-          self._cache[key] = status
-        # a single failed request leaves the prior status in place rather than
-        # instantly blanking it -- the staleness check below still fail-closes
-        # it once it's genuinely too old to trust.
+      start = False
+      with self._lock:
+        cached = self._cache.get(key)
+        if cached is not None and cached.age(now) < STALE_TIMEOUT_S:
+          self._status = cached
+        elif not self._inflight:
+          # Only one request outstanding at a time -- the public Overpass
+          # endpoint rate-limits bursts, and a backlog of stale in-flight
+          # queries would resolve against positions already driven past.
+          self._inflight = True
+          start = True
+      if start:
+        threading.Thread(target=self._run_query, args=(pos, key), daemon=True).start()
 
-    if self._status.age(now) > STALE_TIMEOUT_S:
-      self._status = LaneStatus()
+    # A failed or still-pending request leaves the prior status in place rather
+    # than instantly blanking it -- this is what fail-closes it once it's
+    # genuinely too old to trust.
+    with self._lock:
+      if self._status.age(time.monotonic()) > STALE_TIMEOUT_S:
+        self._status = LaneStatus()
 
   def get_status(self) -> tuple[bool, bool, float]:
     now = time.monotonic()
-    return self._status.valid, self._status.same_direction, self._status.age(now)
+    with self._lock:
+      return self._status.valid, self._status.same_direction, self._status.age(now)
